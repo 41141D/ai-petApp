@@ -1,4 +1,5 @@
-#you can simply change the model and the system prompt!
+#you can change the model and the prompts if u want to, enjoyy!
+
 import sys
 import sqlite3
 import requests
@@ -8,15 +9,39 @@ from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QPoint, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QMainWindow, QTextBrowser, QFileDialog
 
+class weatherstuff(QThread):
+    signalweather = pyqtSignal(dict)
+    def __init__(self,city):
+        super().__init__()
+        self.city =city
+    def run(self):
+        api = "4e82ae2ab02eaa6c9c4078536e027579"
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={self.city}&appid={api}"
+        r = requests.get(url)
+        if r.status_code == 200:
+            response = r.json()
+            temperature = response['main']['temp']
+            weather_description = response['weather'][0]['description']
+            humidity = response['main']['humidity']
+            wind_speed = response['wind']['speed']
+            temp_c = temperature - 273.15
+            x ={
+                "temp":temp_c,
+                "humidity":humidity,
+                "wind_speed":wind_speed,
+                "weather_description":weather_description,
+            }
+        self.signalweather.emit(x)
 
 class ollamastuff(QThread):
     signal = pyqtSignal(dict)
-    def __init__(self,user_prompt,chat_context,memory_for_val,reading):
+    def __init__(self,user_prompt,chat_context,memory_for_val,reading,weatherstuffig):
         super().__init__()
         self.user_prompt = user_prompt
         self.chat_context = chat_context
         self.memory_for_val = memory_for_val
         self.reading = reading
+        self.weatherstuffig = weatherstuffig
     def run(self):
         url = "http://localhost:11434/api/generate"
         session_proxies = {
@@ -24,24 +49,74 @@ class ollamastuff(QThread):
             "https": None,
         }
         system_prompt = (
-            "You are Lilac (nicknamed 'Lal'), a highly intelligent and formal AI companion "
+            "You are Lilac (nicknamed 'Lal'), a highly intelligent AI companion "
             "for Dan, an 18-year-old software engineering student at Koya University.\n\n"
 
-            "CRITICAL RULES:\n"
-            "- You must ALWAYS respond strictly with a valid JSON object. Do not include any text outside the JSON.\n"
-            "- Be concise, professional, and respectful. Avoid casual slang.\n"
-            "- If Dan asks you to remember something (e.g., 'Remember my favorite language is Python'), "
-            "set 'action' to 'remember' and fill in 'memory_key' and 'memory_value'.\n"
-            "- For general conversation where no system action is needed, set 'action', 'memory_key', "
-            "and 'memory_value' to null.\n\n"
+            "GENERAL RULES:\n"
+            "- Always respond ONLY with valid JSON.\n"
+            "- Never output any text outside the JSON object.\n"
+            "- Be intelligent, concise, honest, and helpful.\n"
+            "- Never invent facts. If you don't know something, say so.\n\n"
+
+            "AVAILABLE TOOLS:\n\n"
+
+            "1. MEMORY TOOL\n"
+            "- If Dan asks you to permanently remember something, "
+            "set action='remember'.\n"
+            "- Store the information using memory_key and memory_value.\n"
+            "- If memory is not required, set action to null.\n\n"
+
+            "2. WEATHER TOOL\n"
+            "- You CANNOT access live weather yourself.\n"
+            "- Whenever Dan asks about current weather, temperature, humidity, rain, "
+            "wind, or today's forecast, call the weather tool.\n"
+            "- Set action='weather'.\n"
+            "- tool_input MUST contain ONLY the city name.\n"
+            "- Examples of valid tool_input:\n"
+            "  London\n"
+            "  Erbil\n"
+            "  Tokyo\n"
+            "- Do NOT include extra words such as:\n"
+            "  weather in London\n"
+            "  city: London\n\n"
+
+            "- If Dan does not specify a city, ask which city he means.\n"
+            "- In that situation:\n"
+            "  action = null\n"
+            "  tool_input = null\n\n"
+
+            "- If weather information has already been provided by the application, "
+            "DO NOT call the weather tool again.\n"
+            "- Instead, answer naturally using the supplied weather data.\n\n"
+
+            "EXAMPLES:\n\n"
+
+            "User: What's the weather in London?\n"
+            "{\n"
+            '  "reply":"Checking the weather for London...",\n'
+            '  "action":"weather",\n'
+            '  "tool_input":"London",\n'
+            '  "memory_key":null,\n'
+            '  "memory_value":null\n'
+            "}\n\n"
+
+            "User: What's the weather today?\n"
+            "{\n"
+            '  "reply":"Which city would you like the weather for?",\n'
+            '  "action":null,\n'
+            '  "tool_input":null,\n'
+            '  "memory_key":null,\n'
+            '  "memory_value":null\n'
+            "}\n\n"
 
             "REQUIRED JSON FORMAT:\n"
             "{\n"
-            '  "reply": "Your response to Dan.",\n'
-            '  "action": "remember" or null,\n'
-            '  "memory_key": "key" or null,\n'
-            '  "memory_value": "value" or null\n'
-            "}\n"
+            '  "reply":"...",\n'
+            '  "action":"remember" | "weather" | null,\n'
+            '  "tool_input":"..." | null,\n'
+            '  "memory_key":"..." | null,\n'
+            '  "memory_value":"..." | null\n'
+            "}"
         )
         full_prompt = (
             f"{system_prompt}\n"
@@ -50,6 +125,7 @@ class ollamastuff(QThread):
             f"{self.chat_context}\n"
             f"Dan: {self.user_prompt}\n"
             f"FILE CONTENT {self.reading}\n"
+            f"WEATHER {self.weatherstuffig}"
             f"Lal:"
         )
         payload = {"model":"qwen2.5:7b","prompt":full_prompt,"stream":False,"format":"json"}
@@ -61,10 +137,12 @@ class ollamastuff(QThread):
         except Exception as e:
             parsed_data = {"reply":f"Error connecting to Ollama or parsing JSON: {str(e)}",
                            "action":None,
+                           "tool_input":None,
                            "memory_key":None,
                            "memory_value":None
                            }
         self.signal.emit(parsed_data)
+
 class lalsdatabase:
     def __init__(self):
         self.sql = sqlite3.connect('Signatureproject.db')
@@ -102,6 +180,7 @@ class LalLiteVer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.f = ""
+        self.desc = ""
         self.button_for_file = QPushButton("upload TXT file",self)
         self.button_for_file.setGeometry(730,390,120,23)
         self.button_for_file.clicked.connect(self.open_file_fr)
@@ -288,7 +367,7 @@ class LalLiteVer(QMainWindow):
             return
         else:
             self.current_user_text = text
-            self.worker = ollamastuff(text,chat_history,memory_for_val,self.f)
+            self.worker = ollamastuff(text,chat_history,memory_for_val,self.f,self.desc)
             self.worker.signal.connect(self.handle_ai_reply)
             self.worker.start()
     def handle_ai_reply(self,aiq_reply):
@@ -297,8 +376,29 @@ class LalLiteVer(QMainWindow):
         self.update()
         ai_reply = aiq_reply.get("reply","")
         action = aiq_reply.get("action")
+        city = aiq_reply.get("tool_input")
         memory_key = aiq_reply.get("memory_key")
         memory_value = aiq_reply.get("memory_value")
+
+        if action == "weather":
+            self.starter = weatherstuff(city)
+            self.starter.signalweather.connect(self.weather_fr)
+            self.starter.weatherdescription.connect(self.weather_fr)
+            self.starter.start()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         if action == "remember" and memory_key and memory_value:
             self.db.remembering(memory_key, memory_value)
             self.display_text.append(f"[System: Lal executed 'remember' -> {memory_key}: {memory_value}]\n")
@@ -349,6 +449,11 @@ class LalLiteVer(QMainWindow):
         if self.filename:
             with open(self.filename,"r") as f:
                  self.f = f.read()
+    def weather_fr(self,desc):
+        self.desc = desc
+
+
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = LalLiteVer()
