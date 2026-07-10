@@ -110,10 +110,8 @@ class Prompts:
         )
         web_summary = ""
         for result in websearchstuff:
-            web_summary += (f"title: {result['title']}\n"
-                            f"url: {result['url']}\n"
-                            f"body: {result['body']}\n"
-                            )
+            web_summary += f"{result.title}\n{result.url}\n{result.body}\n\n"
+
         full_prompts = (
              f"{system_prompt}\n"
             f"MEMORY:\n{memory_forlal}\n\n"
