@@ -61,7 +61,7 @@ class weatherstuff(QThread):
         super().__init__()
         self.city =city
     def run(self):
-        api = OPENWEATHER_API
+        api = "your api key here please"
         url = f"https://api.openweathermap.org/data/2.5/weather?q={self.city}&appid={api}"
         r = requests.get(url)
         if r.status_code == 200:
